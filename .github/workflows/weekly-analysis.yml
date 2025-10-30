@@ -1,0 +1,38 @@
+name: Weekly Uniswap Analysis
+
+on:
+  schedule:
+    # Запускать каждую субботу в 10:00 по Москве (07:00 UTC)
+    - cron: '0 7 * * 6'
+  workflow_dispatch:  # Позволяет запускать вручную
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Run Uniswap Analyzer
+      run: |
+        python uniswap_analyzer.py
+        
+    - name: Notify on failure
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        text: '🚨 Weekly Uniswap analysis failed!'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
