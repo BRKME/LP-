@@ -19,6 +19,13 @@ class UniswapAnalyzer:
         self.telegram_token = "8442392037:AAEiM_b4QfdFLqbmmc1PXNvA99yxmFVLEp8"
         self.chat_id = "350766421"
         
+        # Target tokens (без ARB)
+        self.target_tokens = [
+            'USDT', 'USDC', 'USDC.e', 'WETH', 'ETH', 'sETH', 'WBTC', 
+            'LINK', 'CRV', 'AAVE', 'SOL', 'ASTER', 'BNB', 'DAI', 
+            'PENDLE', 'ZRO'  # ARB исключен
+        ]
+        
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json'
@@ -47,6 +54,37 @@ class UniswapAnalyzer:
         except Exception as e:
             print(f"❌ Failed to send Telegram message: {e}")
             return False
+    
+    def is_target_pool(self, token0: str, token1: str) -> bool:
+        """Check if pool contains target tokens"""
+        norm_token0 = self.normalize_token_symbol(token0)
+        norm_token1 = self.normalize_token_symbol(token1)
+        
+        return (norm_token0 in self.target_tokens or norm_token1 in self.target_tokens)
+    
+    def normalize_token_symbol(self, symbol: str) -> str:
+        """Normalize token symbol for consistent matching"""
+        if not symbol:
+            return symbol
+            
+        symbol_upper = symbol.upper().strip()
+        
+        # Token aliases
+        token_aliases = {
+            'ASTER': ['ASTER', 'ASTR'],
+            'BNB': ['BNB', 'WBNB'],
+            'DAI': ['DAI'],
+            'PENDLE': ['PENDLE'],
+            'ZRO': ['ZRO', 'ZROOM'],
+            'ETH': ['ETH', 'WETH', 'SETH'],
+            'USDC.e': ['USDC.E', 'USDC-E', 'USDC_E']
+        }
+        
+        for main_token, aliases in token_aliases.items():
+            if symbol_upper in aliases or symbol_upper == main_token:
+                return main_token
+        
+        return symbol_upper
     
     async def fetch_defillama_yields(self):
         """Fetch yield data from DeFiLlama"""
@@ -114,8 +152,18 @@ class UniswapAnalyzer:
                     if response.status == 200:
                         data = await response.json()
                         pools = data.get('data', {}).get('pools', [])
-                        print(f"✅ Fetched {len(pools)} pools from {network}")
-                        return pools
+                        
+                        # Filter pools by target tokens
+                        filtered_pools = [
+                            p for p in pools 
+                            if self.is_target_pool(
+                                p['token0']['symbol'], 
+                                p['token1']['symbol']
+                            )
+                        ]
+                        
+                        print(f"✅ Fetched {len(filtered_pools)} target pools from {network}")
+                        return filtered_pools
                     else:
                         print(f"❌ {network} Graph API returned status: {response.status}")
                         return []
@@ -177,15 +225,18 @@ class UniswapAnalyzer:
         ]
         
         for pool in network_defillama:
-            all_pools.append({
-                'Pool': pool.get('symbol', 'Unknown'),
-                'Network': network.upper(),
-                'APR': round(pool.get('apy', 0)),
-                'TVL': round(pool.get('tvlUsd', 0)),
-                'Source': 'DeFiLlama'
-            })
+            # Check if pool contains target tokens
+            symbol = pool.get('symbol', '')
+            if any(token in symbol.upper() for token in self.target_tokens):
+                all_pools.append({
+                    'Pool': pool.get('symbol', 'Unknown'),
+                    'Network': network.upper(),
+                    'APR': round(pool.get('apy', 0)),
+                    'TVL': round(pool.get('tvlUsd', 0)),
+                    'Source': 'DeFiLlama'
+                })
         
-        # Process Graph API pools
+        # Process Graph API pools (уже отфильтрованы по целевым токенам)
         for pool in graph_pools:
             token0 = pool['token0']['symbol']
             token1 = pool['token1']['symbol']
@@ -219,7 +270,8 @@ class UniswapAnalyzer:
         
         message = f"🚀 <b>Uniswap V3 Weekly Analysis</b>\n"
         message += f"⏰ <i>{timestamp} (MSK)</i>\n"
-        message += f"📊 Min TVL: ${self.MIN_TVL:,} | Min APR: {self.MIN_APR}%\n\n"
+        message += f"📊 Min TVL: ${self.MIN_TVL:,} | Min APR: {self.MIN_APR}%\n"
+        message += f"🎯 Target tokens: {', '.join(self.target_tokens)}\n\n"
         
         # Arbitrum pools
         if arbitrum_pools:
@@ -253,6 +305,9 @@ class UniswapAnalyzer:
     async def run_analysis(self):
         """Main analysis function"""
         print("🔧 Uniswap V3 Weekly Analyzer")
+        print("=" * 50)
+        print(f"🎯 Target tokens: {', '.join(self.target_tokens)}")
+        print(f"📊 Min TVL: ${self.MIN_TVL:,} | Min APR: {self.MIN_APR}%")
         print("=" * 50)
         
         # Define subgraph URLs
