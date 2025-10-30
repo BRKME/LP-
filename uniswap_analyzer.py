@@ -1,103 +1,52 @@
 #!/usr/bin/env python3
 """
 Uniswap V3 Analyzer with Telegram notifications
-Automated script for finding high APR pools on Arbitrum and BSC
+Simplified version for GitHub Actions
 """
 
 import asyncio
 import aiohttp
-import pandas as pd
+import json
 from datetime import datetime
-import os
-import sys
-from telegram import Bot
-from telegram.error import TelegramError
 
 class UniswapAnalyzer:
     def __init__(self):
-        # Minimum TVL threshold
+        # Minimum thresholds
         self.MIN_TVL = 1000000  # $1,000,000
-        self.MIN_APR = 15  # Минимальный APR 15%
+        self.MIN_APR = 15  # Minimum APR 15%
         
-        # Telegram настройки
+        # Telegram settings
         self.telegram_token = "8442392037:AAEiM_b4QfdFLqbmmc1PXNvA99yxmFVLEp8"
         self.chat_id = "350766421"
-        self.telegram_enabled = True
-        
-        # Target tokens
-        self.target_tokens = [
-            'USDT', 'USDC', 'USDC.e', 'WETH', 'ETH', 'sETH', 'WBTC', 
-            'LINK', 'CRV', 'AAVE', 'SOL', 'ASTER', 'BNB', 'DAI', 
-            'ARB', 'PENDLE', 'ZRO'
-        ]
         
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
         }
-        
-        print(f"🤖 Telegram configured: {self.telegram_enabled}")
     
     async def send_telegram_message(self, message: str):
         """Send message to Telegram"""
-        if not self.telegram_enabled:
-            return False
-            
         try:
-            bot = Bot(token=self.telegram_token)
-            await bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
-            print("✅ Telegram message sent successfully")
-            return True
+            url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
+            payload = {
+                'chat_id': self.chat_id,
+                'text': message,
+                'parse_mode': 'HTML',
+                'disable_web_page_preview': True
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    if response.status == 200:
+                        print("✅ Telegram message sent successfully")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        print(f"❌ Telegram API error: {error_text}")
+                        return False
         except Exception as e:
             print(f"❌ Failed to send Telegram message: {e}")
             return False
-    
-    async def send_telegram_results(self, network_pools: dict):
-        """Send analysis results to Telegram"""
-        if not self.telegram_enabled:
-            return
-            
-        arbitrum_pools = network_pools['arbitrum']
-        bsc_pools = network_pools['bsc']
-        
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        message = f"🚀 <b>Uniswap V3 Weekly Analysis</b>\n"
-        message += f"⏰ <i>{timestamp} (MSK)</i>\n"
-        message += f"📊 Min TVL: ${self.MIN_TVL:,} | Min APR: {self.MIN_APR}%\n\n"
-        
-        # Arbitrum pools
-        if arbitrum_pools:
-            message += "🔹 <b>ARBITRUM NETWORK</b>\n"
-            for i, pool in enumerate(arbitrum_pools[:5], 1):
-                message += (f"{i}. {pool['Pool']}\n"
-                          f"   📈 APR: <b>{pool['Est. APR (%)']}%</b>\n"
-                          f"   💰 TVL: ${pool['TVL (USD)']:,}\n"
-                          f"   🔍 Source: {pool['Source']}\n\n")
-        else:
-            message += "🔹 <b>ARBITRUM NETWORK</b>\nNo pools found\n\n"
-        
-        # BSC pools
-        if bsc_pools:
-            message += "🔸 <b>BSC NETWORK</b>\n"
-            for i, pool in enumerate(bsc_pools[:5], 1):
-                message += (f"{i}. {pool['Pool']}\n"
-                          f"   📈 APR: <b>{pool['Est. APR (%)']}%</b>\n"
-                          f"   💰 TVL: ${pool['TVL (USD)']:,}\n"
-                          f"   🔍 Source: {pool['Source']}\n\n")
-        else:
-            message += "🔸 <b>BSC NETWORK</b>\nNo pools found\n\n"
-        
-        # Summary
-        total_pools = len(arbitrum_pools) + len(bsc_pools)
-        message += f"📈 <b>Total pools found: {total_pools}</b>\n\n"
-        message += "⚡ <i>Automated weekly report</i>"
-        
-        await self.send_telegram_message(message)
     
     async def fetch_defillama_yields(self):
         """Fetch yield data from DeFiLlama"""
@@ -105,29 +54,36 @@ class UniswapAnalyzer:
         
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=self.headers) as response:
-                    data = await response.json()
-                    pools = data.get('data', [])
-                    
-                    filtered_pools = [
-                        p for p in pools 
-                        if p.get('tvlUsd', 0) >= self.MIN_TVL 
-                        and p.get('apy', 0) >= self.MIN_APR
-                        and p.get('chain') in ['Arbitrum', 'BSC']
-                        and 'uniswap' in p.get('project', '').lower()
-                    ]
-                    
-                    return filtered_pools
+                async with session.get(url, headers=self.headers, timeout=30) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        pools = data.get('data', [])
+                        
+                        # Filter pools
+                        filtered_pools = [
+                            p for p in pools 
+                            if p.get('tvlUsd', 0) >= self.MIN_TVL 
+                            and p.get('apy', 0) >= self.MIN_APR
+                            and p.get('chain') in ['Arbitrum', 'BSC']
+                            and 'uniswap' in p.get('project', '').lower()
+                        ]
+                        return filtered_pools
+                    else:
+                        print(f"❌ DeFiLlama API returned status: {response.status}")
+                        return []
+        except asyncio.TimeoutError:
+            print("❌ DeFiLlama API timeout")
+            return []
         except Exception as e:
             print(f"❌ DeFiLlama API error: {e}")
             return []
     
-    async def fetch_uniswap_graph_arbitrum(self):
-        """Fetch pools from Uniswap Graph API for Arbitrum"""
+    async def fetch_uniswap_graph(self, subgraph_url: str, network: str):
+        """Fetch pools from Uniswap Graph API"""
         query = """
         {
           pools(
-            first: 200
+            first: 100
             where: {
               totalValueLockedUSD_gt: %d
             }
@@ -135,8 +91,8 @@ class UniswapAnalyzer:
             orderDirection: desc
           ) {
             id
-            token0 { symbol id }
-            token1 { symbol id }
+            token0 { symbol }
+            token1 { symbol }
             totalValueLockedUSD
             feesUSD
             poolDayData(first: 7, orderBy: date, orderDirection: desc) {
@@ -147,51 +103,27 @@ class UniswapAnalyzer:
         }
         """ % self.MIN_TVL
         
-        url = "https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3"
-        
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, json={'query': query}, headers=self.headers) as response:
-                    data = await response.json()
-                    return data.get('data', {}).get('pools', [])
-        except Exception as e:
-            print(f"❌ Uniswap Arbitrum Graph API error: {e}")
+                async with session.post(
+                    subgraph_url, 
+                    json={'query': query}, 
+                    headers=self.headers,
+                    timeout=30
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        pools = data.get('data', {}).get('pools', [])
+                        print(f"✅ Fetched {len(pools)} pools from {network}")
+                        return pools
+                    else:
+                        print(f"❌ {network} Graph API returned status: {response.status}")
+                        return []
+        except asyncio.TimeoutError:
+            print(f"❌ {network} Graph API timeout")
             return []
-    
-    async def fetch_uniswap_graph_bsc(self):
-        """Fetch pools from Uniswap Graph API for BSC"""
-        query = """
-        {
-          pools(
-            first: 200
-            where: {
-              totalValueLockedUSD_gt: %d
-            }
-            orderBy: totalValueLockedUSD
-            orderDirection: desc
-          ) {
-            id
-            token0 { symbol id }
-            token1 { symbol id }
-            totalValueLockedUSD
-            feesUSD
-            poolDayData(first: 7, orderBy: date, orderDirection: desc) {
-              feesUSD
-              date
-            }
-          }
-        }
-        """ % self.MIN_TVL
-        
-        url = "https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3-bsc"
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json={'query': query}, headers=self.headers) as response:
-                    data = await response.json()
-                    return data.get('data', {}).get('pools', [])
         except Exception as e:
-            print(f"❌ Uniswap BSC Graph API error: {e}")
+            print(f"❌ {network} Graph API error: {e}")
             return []
     
     def calculate_v3_apr(self, pool_data, days=7):
@@ -204,7 +136,10 @@ class UniswapAnalyzer:
             if available_days == 0:
                 return 0
             
-            total_fees = sum(float(day_data.get('feesUSD', 0)) for day_data in pool_data['poolDayData'][:available_days])
+            total_fees = sum(
+                float(day_data.get('feesUSD', 0)) 
+                for day_data in pool_data['poolDayData'][:available_days]
+            )
             daily_fees = total_fees / available_days
             tvl = float(pool_data.get('totalValueLockedUSD', 1))
             
@@ -218,27 +153,35 @@ class UniswapAnalyzer:
         except Exception as e:
             return 0
     
-    async def analyze_arbitrum_pools(self):
-        """Analyze Arbitrum pools"""
+    async def analyze_network(self, network: str, subgraph_url: str):
+        """Analyze pools for a specific network"""
+        print(f"🔍 Analyzing {network} pools...")
+        
+        # Fetch data from both sources
         defillama_pools, graph_pools = await asyncio.gather(
             self.fetch_defillama_yields(),
-            self.fetch_uniswap_graph_arbitrum(),
+            self.fetch_uniswap_graph(subgraph_url, network),
             return_exceptions=True
         )
         
+        # Handle exceptions
         defillama_pools = defillama_pools if not isinstance(defillama_pools, Exception) else []
         graph_pools = graph_pools if not isinstance(graph_pools, Exception) else []
         
         all_pools = []
         
-        # Process DeFiLlama pools
-        arbitrum_defillama = [p for p in defillama_pools if p.get('chain') == 'Arbitrum']
-        for pool in arbitrum_defillama:
+        # Process DeFiLlama pools for this network
+        network_defillama = [
+            p for p in defillama_pools 
+            if p.get('chain', '').lower() == network.lower()
+        ]
+        
+        for pool in network_defillama:
             all_pools.append({
                 'Pool': pool.get('symbol', 'Unknown'),
-                'Network': 'ARBITRUM',
-                'Est. APR (%)': round(pool.get('apy', 0)),
-                'TVL (USD)': round(pool.get('tvlUsd', 0)),
+                'Network': network.upper(),
+                'APR': round(pool.get('apy', 0)),
+                'TVL': round(pool.get('tvlUsd', 0)),
                 'Source': 'DeFiLlama'
             })
         
@@ -254,113 +197,105 @@ class UniswapAnalyzer:
                 if apr >= self.MIN_APR:
                     all_pools.append({
                         'Pool': pool_name,
-                        'Network': 'ARBITRUM',
-                        'Est. APR (%)': round(apr),
-                        'TVL (USD)': round(tvl),
+                        'Network': network.upper(),
+                        'APR': round(apr),
+                        'TVL': round(tvl),
                         'Source': 'Uniswap Graph'
                     })
         
-        return all_pools[:10]  # Return top 10
+        # Remove duplicates and sort by APR
+        unique_pools = {}
+        for pool in all_pools:
+            pool_key = pool['Pool']
+            if pool_key not in unique_pools or pool['APR'] > unique_pools[pool_key]['APR']:
+                unique_pools[pool_key] = pool
+        
+        sorted_pools = sorted(unique_pools.values(), key=lambda x: x['APR'], reverse=True)
+        return sorted_pools[:8]  # Return top 8 pools
     
-    async def analyze_bsc_pools(self):
-        """Analyze BSC pools"""
-        defillama_pools, graph_pools = await asyncio.gather(
-            self.fetch_defillama_yields(),
-            self.fetch_uniswap_graph_bsc(),
-            return_exceptions=True
-        )
+    async def send_results_to_telegram(self, arbitrum_pools, bsc_pools):
+        """Send formatted results to Telegram"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        defillama_pools = defillama_pools if not isinstance(defillama_pools, Exception) else []
-        graph_pools = graph_pools if not isinstance(graph_pools, Exception) else []
+        message = f"🚀 <b>Uniswap V3 Weekly Analysis</b>\n"
+        message += f"⏰ <i>{timestamp} (MSK)</i>\n"
+        message += f"📊 Min TVL: ${self.MIN_TVL:,} | Min APR: {self.MIN_APR}%\n\n"
         
-        all_pools = []
+        # Arbitrum pools
+        if arbitrum_pools:
+            message += "🔹 <b>ARBITRUM NETWORK</b>\n"
+            for i, pool in enumerate(arbitrum_pools[:5], 1):
+                message += (f"{i}. {pool['Pool']}\n"
+                          f"   📈 APR: <b>{pool['APR']}%</b>\n"
+                          f"   💰 TVL: ${pool['TVL']:,}\n"
+                          f"   🔍 {pool['Source']}\n\n")
+        else:
+            message += "🔹 <b>ARBITRUM NETWORK</b>\nNo pools found\n\n"
         
-        # Process DeFiLlama pools
-        bsc_defillama = [p for p in defillama_pools if p.get('chain') == 'BSC']
-        for pool in bsc_defillama:
-            all_pools.append({
-                'Pool': pool.get('symbol', 'Unknown'),
-                'Network': 'BSC',
-                'Est. APR (%)': round(pool.get('apy', 0)),
-                'TVL (USD)': round(pool.get('tvlUsd', 0)),
-                'Source': 'DeFiLlama'
-            })
+        # BSC pools
+        if bsc_pools:
+            message += "🔸 <b>BSC NETWORK</b>\n"
+            for i, pool in enumerate(bsc_pools[:5], 1):
+                message += (f"{i}. {pool['Pool']}\n"
+                          f"   📈 APR: <b>{pool['APR']}%</b>\n"
+                          f"   💰 TVL: ${pool['TVL']:,}\n"
+                          f"   🔍 {pool['Source']}\n\n")
+        else:
+            message += "🔸 <b>BSC NETWORK</b>\nNo pools found\n\n"
         
-        # Process Graph API pools
-        for pool in graph_pools:
-            token0 = pool['token0']['symbol']
-            token1 = pool['token1']['symbol']
-            pool_name = f"{token0}-{token1}"
-            tvl = float(pool.get('totalValueLockedUSD', 0))
-            
-            if tvl >= self.MIN_TVL:
-                apr = self.calculate_v3_apr(pool, 7)
-                if apr >= self.MIN_APR:
-                    all_pools.append({
-                        'Pool': pool_name,
-                        'Network': 'BSC',
-                        'Est. APR (%)': round(apr),
-                        'TVL (USD)': round(tvl),
-                        'Source': 'Uniswap Graph'
-                    })
+        # Summary
+        total_pools = len(arbitrum_pools) + len(bsc_pools)
+        message += f"📈 <b>Total pools found: {total_pools}</b>\n\n"
+        message += "⚡ <i>Automated weekly report</i>"
         
-        return all_pools[:10]  # Return top 10
+        await self.send_telegram_message(message)
     
-    async def analyze_all_networks(self):
-        """Analyze pools across all networks"""
-        print("🔄 Analyzing pools from multiple sources...")
-        
-        if self.telegram_enabled:
-            await self.send_telegram_message("🔄 <b>Starting weekly Uniswap V3 analysis...</b>")
-        
-        arbitrum_pools, bsc_pools = await asyncio.gather(
-            self.analyze_arbitrum_pools(),
-            self.analyze_bsc_pools(),
-            return_exceptions=True
-        )
-        
-        arbitrum_pools = arbitrum_pools if not isinstance(arbitrum_pools, Exception) else []
-        bsc_pools = bsc_pools if not isinstance(bsc_pools, Exception) else []
-        
-        return {
-            'arbitrum': arbitrum_pools,
-            'bsc': bsc_pools
-        }
-
-async def main():
-    """Main execution function"""
-    analyzer = UniswapAnalyzer()
-    
-    try:
+    async def run_analysis(self):
+        """Main analysis function"""
         print("🔧 Uniswap V3 Weekly Analyzer")
         print("=" * 50)
         
-        network_pools = await analyzer.analyze_all_networks()
+        # Define subgraph URLs
+        subgraphs = {
+            'arbitrum': 'https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3',
+            'bsc': 'https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3-bsc'
+        }
+        
+        # Analyze both networks in parallel
+        arbitrum_pools, bsc_pools = await asyncio.gather(
+            self.analyze_network('arbitrum', subgraphs['arbitrum']),
+            self.analyze_network('bsc', subgraphs['bsc'])
+        )
         
         # Display results in console
-        arbitrum_pools = network_pools['arbitrum']
-        bsc_pools = network_pools['bsc']
+        print(f"\n📊 ANALYSIS RESULTS:")
+        print(f"🔹 Arbitrum: {len(arbitrum_pools)} pools")
+        for pool in arbitrum_pools[:3]:
+            print(f"   {pool['Pool']} - {pool['APR']}% APR - ${pool['TVL']:,} TVL")
         
-        if arbitrum_pools:
-            print(f"\n🔹 ARBITRUM NETWORK (Top {len(arbitrum_pools)}):")
-            for pool in arbitrum_pools:
-                print(f"   {pool['Pool']} - APR: {pool['Est. APR (%)']}% - TVL: ${pool['TVL (USD)']:,}")
-        
-        if bsc_pools:
-            print(f"\n🔸 BSC NETWORK (Top {len(bsc_pools)}):")
-            for pool in bsc_pools:
-                print(f"   {pool['Pool']} - APR: {pool['Est. APR (%)']}% - TVL: ${pool['TVL (USD)']:,}")
+        print(f"🔸 BSC: {len(bsc_pools)} pools")
+        for pool in bsc_pools[:3]:
+            print(f"   {pool['Pool']} - {pool['APR']}% APR - ${pool['TVL']:,} TVL")
         
         # Send to Telegram
-        if analyzer.telegram_enabled:
-            await analyzer.send_telegram_results(network_pools)
-            print(f"\n✅ Results sent to Telegram! Total pools: {len(arbitrum_pools) + len(bsc_pools)}")
+        print("\n📱 Sending results to Telegram...")
+        await self.send_results_to_telegram(arbitrum_pools, bsc_pools)
         
+        print(f"✅ Analysis completed! Total pools found: {len(arbitrum_pools) + len(bsc_pools)}")
+
+async def main():
+    """Main execution function"""
+    try:
+        analyzer = UniswapAnalyzer()
+        await analyzer.run_analysis()
     except Exception as e:
-        error_msg = f"❌ Analysis failed: {e}"
-        print(error_msg)
-        if analyzer.telegram_enabled:
-            await analyzer.send_telegram_message(f"❌ <b>Analysis Failed</b>\n{error_msg}")
+        print(f"❌ Critical error: {e}")
+        # Try to send error to Telegram
+        try:
+            analyzer = UniswapAnalyzer()
+            await analyzer.send_telegram_message(f"❌ <b>Analysis Failed</b>\n{str(e)}")
+        except:
+            pass
 
 if __name__ == "__main__":
     asyncio.run(main())
