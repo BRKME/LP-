@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Uniswap V3 Analyzer for Arbitrum, BNB Chain, Unichain
+Uniswap V3 Analyzer with Telegram notifications
+Simplified version for GitHub Actions
 """
 
 import asyncio
@@ -10,20 +11,19 @@ from datetime import datetime
 
 class UniswapAnalyzer:
     def __init__(self):
-        # Оптимизированные условия для большего количества пулов
-        self.MIN_TVL = 300000  # $300,000
-        self.MIN_APR = 8  # Minimum APR 8%
+        # Minimum thresholds
+        self.MIN_TVL = 800000  # $800,000
+        self.MIN_APR = 10  # Minimum APR 15%
         
         # Telegram settings
         self.telegram_token = "8442392037:AAEiM_b4QfdFLqbmmc1PXNvA99yxmFVLEp8"
         self.chat_id = "350766421"
         
-        # Целевые токены для Uniswap
+        # Target tokens (без ARB)
         self.target_tokens = [
-            'USDT', 'USDC', 'USDC.e', 'WETH', 'ETH', 'WBTC', 
-            'LINK', 'AAVE', 'SOL', 'ASTER', 'BNB', 'DAI', 
-            'PENDLE', 'ZRO', 'MATIC', 'AVAX', 'OP', 'ARB',
-            'UNI', 'CRV', 'MKR', 'SNX'
+            'USDT', 'USDC', 'USDC.e', 'WETH', 'ETH', 'sETH', 'WBTC', 
+            'LINK', 'CRV', 'AAVE', 'SOL', 'ASTER', 'BNB', 'DAI', 
+            'PENDLE', 'ZRO'  # ARB исключен
         ]
         
         self.headers = {
@@ -69,14 +69,15 @@ class UniswapAnalyzer:
             
         symbol_upper = symbol.upper().strip()
         
-        # Алиасы токенов
+        # Token aliases
         token_aliases = {
-            'ETH': ['ETH', 'WETH', 'SETH'],
-            'USDC.e': ['USDC.E', 'USDC-E', 'USDC_E'],
-            'BNB': ['BNB', 'WBNB'],
-            'MATIC': ['MATIC', 'WMATIC'],
-            'AVAX': ['AVAX', 'WAVAX'],
             'ASTER': ['ASTER', 'ASTR'],
+            'BNB': ['BNB', 'WBNB'],
+            'DAI': ['DAI'],
+            'PENDLE': ['PENDLE'],
+            'ZRO': ['ZRO', 'ZROOM'],
+            'ETH': ['ETH', 'WETH', 'SETH'],
+            'USDC.e': ['USDC.E', 'USDC-E', 'USDC_E']
         }
         
         for main_token, aliases in token_aliases.items():
@@ -86,7 +87,7 @@ class UniswapAnalyzer:
         return symbol_upper
     
     async def fetch_defillama_yields(self):
-        """Fetch yield data from DeFiLlama только для Uniswap"""
+        """Fetch yield data from DeFiLlama"""
         url = "https://yields.llama.fi/pools"
         
         try:
@@ -96,14 +97,13 @@ class UniswapAnalyzer:
                         data = await response.json()
                         pools = data.get('data', [])
                         
-                        # Фильтрация ТОЛЬКО для Uniswap V3
+                        # Filter pools
                         filtered_pools = [
                             p for p in pools 
                             if p.get('tvlUsd', 0) >= self.MIN_TVL 
                             and p.get('apy', 0) >= self.MIN_APR
                             and p.get('chain') in ['Arbitrum', 'BSC']
                             and 'uniswap' in p.get('project', '').lower()
-                            and 'v3' in p.get('project', '').lower()
                         ]
                         return filtered_pools
                     else:
@@ -121,7 +121,7 @@ class UniswapAnalyzer:
         query = """
         {
           pools(
-            first: 300  # Увеличил до 300 для большего охвата
+            first: 100
             where: {
               totalValueLockedUSD_gt: %d
             }
@@ -236,7 +236,7 @@ class UniswapAnalyzer:
                     'Source': 'DeFiLlama'
                 })
         
-        # Process Graph API pools
+        # Process Graph API pools (уже отфильтрованы по целевым токенам)
         for pool in graph_pools:
             token0 = pool['token0']['symbol']
             token1 = pool['token1']['symbol']
@@ -262,89 +262,52 @@ class UniswapAnalyzer:
                 unique_pools[pool_key] = pool
         
         sorted_pools = sorted(unique_pools.values(), key=lambda x: x['APR'], reverse=True)
-        return sorted_pools[:15]  # Возвращаем до 15 пулов
+        return sorted_pools[:8]  # Return top 8 pools
     
-    async def send_results_to_telegram(self, arbitrum_pools, bsc_pools, unichain_pools):
+    async def send_results_to_telegram(self, arbitrum_pools, bsc_pools):
         """Send formatted results to Telegram"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        message = f"🚀 <b>Uniswap V3 Analysis</b>\n"
+        message = f"🚀 <b>Uniswap V3 Weekly Analysis</b>\n"
         message += f"⏰ <i>{timestamp} (MSK)</i>\n"
         message += f"📊 Min TVL: ${self.MIN_TVL:,} | Min APR: {self.MIN_APR}%\n"
-        message += f"🔗 Networks: Arbitrum, BSC, Unichain\n\n"
+        message += f"🎯 Target tokens: {', '.join(self.target_tokens)}\n\n"
         
         # Arbitrum pools
         if arbitrum_pools:
-            message += "🔹 <b>ARBITRUM</b>\n"
-            for i, pool in enumerate(arbitrum_pools[:10], 1):
+            message += "🔹 <b>ARBITRUM NETWORK</b>\n"
+            for i, pool in enumerate(arbitrum_pools[:5], 1):
                 message += (f"{i}. {pool['Pool']}\n"
                           f"   📈 APR: <b>{pool['APR']}%</b>\n"
-                          f"   💰 TVL: ${pool['TVL']:,}\n\n")
+                          f"   💰 TVL: ${pool['TVL']:,}\n"
+                          f"   🔍 {pool['Source']}\n\n")
         else:
-            message += "🔹 <b>ARBITRUM</b>\nNo pools found\n\n"
+            message += "🔹 <b>ARBITRUM NETWORK</b>\nNo pools found\n\n"
         
         # BSC pools
         if bsc_pools:
-            message += "🔸 <b>BSC</b>\n"
-            for i, pool in enumerate(bsc_pools[:10], 1):
+            message += "🔸 <b>BSC NETWORK</b>\n"
+            for i, pool in enumerate(bsc_pools[:5], 1):
                 message += (f"{i}. {pool['Pool']}\n"
                           f"   📈 APR: <b>{pool['APR']}%</b>\n"
-                          f"   💰 TVL: ${pool['TVL']:,}\n\n")
+                          f"   💰 TVL: ${pool['TVL']:,}\n"
+                          f"   🔍 {pool['Source']}\n\n")
         else:
-            message += "🔸 <b>BSC</b>\nNo pools found\n\n"
-        
-        # Unichain pools
-        if unichain_pools:
-            message += "🟣 <b>UNICHAIN</b>\n"
-            for i, pool in enumerate(unichain_pools[:10], 1):
-                message += (f"{i}. {pool['Pool']}\n"
-                          f"   📈 APR: <b>{pool['APR']}%</b>\n"
-                          f"   💰 TVL: ${pool['TVL']:,}\n\n")
-        else:
-            message += "🟣 <b>UNICHAIN</b>\nNo pools found\n\n"
+            message += "🔸 <b>BSC NETWORK</b>\nNo pools found\n\n"
         
         # Summary
-        total_pools = len(arbitrum_pools) + len(bsc_pools) + len(unichain_pools)
+        total_pools = len(arbitrum_pools) + len(bsc_pools)
         message += f"📈 <b>Total pools found: {total_pools}</b>\n\n"
-        message += "⚡ <i>Uniswap V3 only - Automated report</i>"
+        message += "⚡ <i>Automated weekly report</i>"
         
         await self.send_telegram_message(message)
     
-    async def analyze_unichain(self):
-        """Анализ для Unichain (упрощенный, так как нет прямого Graph API)"""
-        print("🔍 Analyzing Unichain pools...")
-        
-        # Для Unichain используем только DeFiLlama
-        defillama_pools = await self.fetch_defillama_yields()
-        
-        unichain_pools = [
-            p for p in defillama_pools 
-            if p.get('chain', '').lower() == 'unichain'
-        ]
-        
-        formatted_pools = []
-        for pool in unichain_pools:
-            symbol = pool.get('symbol', '')
-            if any(token in symbol.upper() for token in self.target_tokens):
-                formatted_pools.append({
-                    'Pool': pool.get('symbol', 'Unknown'),
-                    'Network': 'UNICHAIN',
-                    'APR': round(pool.get('apy', 0)),
-                    'TVL': round(pool.get('tvlUsd', 0)),
-                    'Source': 'DeFiLlama'
-                })
-        
-        # Сортируем по APR
-        sorted_pools = sorted(formatted_pools, key=lambda x: x['APR'], reverse=True)
-        return sorted_pools[:10]
-    
     async def run_analysis(self):
         """Main analysis function"""
-        print("🔧 Uniswap V3 Analyzer")
+        print("🔧 Uniswap V3 Weekly Analyzer")
         print("=" * 50)
-        print(f"🎯 Target tokens: {', '.join(self.target_tokens[:8])}...")
+        print(f"🎯 Target tokens: {', '.join(self.target_tokens)}")
         print(f"📊 Min TVL: ${self.MIN_TVL:,} | Min APR: {self.MIN_APR}%")
-        print(f"🔗 Networks: Arbitrum, BSC, Unichain")
         print("=" * 50)
         
         # Define subgraph URLs
@@ -353,11 +316,10 @@ class UniswapAnalyzer:
             'bsc': 'https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3-bsc'
         }
         
-        # Analyze all networks
-        arbitrum_pools, bsc_pools, unichain_pools = await asyncio.gather(
+        # Analyze both networks in parallel
+        arbitrum_pools, bsc_pools = await asyncio.gather(
             self.analyze_network('arbitrum', subgraphs['arbitrum']),
-            self.analyze_network('bsc', subgraphs['bsc']),
-            self.analyze_unichain()
+            self.analyze_network('bsc', subgraphs['bsc'])
         )
         
         # Display results in console
@@ -370,16 +332,11 @@ class UniswapAnalyzer:
         for pool in bsc_pools[:3]:
             print(f"   {pool['Pool']} - {pool['APR']}% APR - ${pool['TVL']:,} TVL")
         
-        print(f"🟣 Unichain: {len(unichain_pools)} pools")
-        for pool in unichain_pools[:3]:
-            print(f"   {pool['Pool']} - {pool['APR']}% APR - ${pool['TVL']:,} TVL")
-        
         # Send to Telegram
         print("\n📱 Sending results to Telegram...")
-        await self.send_results_to_telegram(arbitrum_pools, bsc_pools, unichain_pools)
+        await self.send_results_to_telegram(arbitrum_pools, bsc_pools)
         
-        total_pools = len(arbitrum_pools) + len(bsc_pools) + len(unichain_pools)
-        print(f"✅ Analysis completed! Total pools found: {total_pools}")
+        print(f"✅ Analysis completed! Total pools found: {len(arbitrum_pools) + len(bsc_pools)}")
 
 async def main():
     """Main execution function"""
@@ -391,7 +348,7 @@ async def main():
         # Try to send error to Telegram
         try:
             analyzer = UniswapAnalyzer()
-            await analyzer.send_telegram_message(f"❌ <b>Uniswap Analysis Failed</b>\n{str(e)}")
+            await analyzer.send_telegram_message(f"❌ <b>Analysis Failed</b>\n{str(e)}")
         except:
             pass
 
