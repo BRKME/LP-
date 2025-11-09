@@ -303,7 +303,7 @@ class UniswapAnalyzer:
         # Arbitrum pools
         if arbitrum_pools:
             message += "🔹 <b>ARBITRUM NETWORK</b> ({} пулов)\n".format(len(arbitrum_pools))
-            for i, pool in enumerate(arbitrum_pools[:15], 1):
+            for i, pool in enumerate(arbitrum_pools[:5], 1):
                 message += (f"{i}. {pool['Pool']}\n"
                           f"   📈 APR: <b>{pool['APR']}%</b>\n"
                           f"   💰 TVL: ${pool['TVL']:,}\n"
@@ -325,7 +325,10 @@ class UniswapAnalyzer:
         # Summary
         total_pools = len(arbitrum_pools) + len(bsc_pools)
         message += f"📈 <b>Total pools found: {total_pools}</b>\n\n"
-        message += "⚡ <i>Automated weekly report</i>"
+        message += "⚡ <i>Automated weekly report</i>\n\n"
+        message += "🔗 <b>Explore more:</b>\n"
+        message += "🔸 <a href='https://app.uniswap.org/explore/pools/bnb'>BNB LP</a>\n"
+        message += "🔹 <a href='https://app.uniswap.org/explore/pools/arbitrum'>ARB LP</a>"
         
         await self.send_telegram_message(message)
     
