@@ -137,7 +137,7 @@ class UniswapAnalyzer:
         query = """
         {
           pools(
-            first: 100
+            first: 1000
             where: {
               totalValueLockedUSD_gt: %d
             }
@@ -287,7 +287,7 @@ class UniswapAnalyzer:
         
         sorted_pools = sorted(unique_pools.values(), key=lambda x: x['APR'], reverse=True)
         print(f"   Total unique pools after filtering: {len(sorted_pools)}")
-        return sorted_pools[:15]  # Return top 15 pools instead of 8
+        return sorted_pools[:50]  # Return top 50 pools
     
     async def send_results_to_telegram(self, arbitrum_pools, bsc_pools):
         """Send formatted results to Telegram"""
@@ -300,7 +300,7 @@ class UniswapAnalyzer:
         # Arbitrum pools
         if arbitrum_pools:
             message += "🔹 <b>ARBITRUM NETWORK</b> ({} пулов)\n".format(len(arbitrum_pools))
-            for i, pool in enumerate(arbitrum_pools[:8], 1):
+            for i, pool in enumerate(arbitrum_pools[:15], 1):
                 message += (f"{i}. {pool['Pool']}\n"
                           f"   📈 APR: <b>{pool['APR']}%</b>\n"
                           f"   💰 TVL: ${pool['TVL']:,}\n"
@@ -311,7 +311,7 @@ class UniswapAnalyzer:
         # BSC pools
         if bsc_pools:
             message += "🔸 <b>BSC NETWORK</b> ({} пулов)\n".format(len(bsc_pools))
-            for i, pool in enumerate(bsc_pools[:8], 1):
+            for i, pool in enumerate(bsc_pools[:15], 1):
                 message += (f"{i}. {pool['Pool']}\n"
                           f"   📈 APR: <b>{pool['APR']}%</b>\n"
                           f"   💰 TVL: ${pool['TVL']:,}\n"
