@@ -233,6 +233,7 @@ class UniswapAnalyzer:
         graph_pools = graph_pools if not isinstance(graph_pools, Exception) else []
         
         all_pools = []
+        pool_names_added = set()
         
         # Process DeFiLlama pools for this network
         network_defillama = [
@@ -240,16 +241,22 @@ class UniswapAnalyzer:
             if p.get('chain', '').lower() == network.lower()
         ]
         
+        print(f"   Found {len(network_defillama)} pools from DeFiLlama")
+        
         for pool in network_defillama:
+            pool_name = pool.get('symbol', 'Unknown')
+            pool_names_added.add(pool_name.lower())
             all_pools.append({
-                'Pool': pool.get('symbol', 'Unknown'),
+                'Pool': pool_name,
                 'Network': network.upper(),
                 'APR': round(pool.get('apy', 0)),
                 'TVL': round(pool.get('tvlUsd', 0)),
                 'Source': 'DeFiLlama'
             })
         
-        # Process Graph API pools
+        # Process Graph API pools - добавляем только те, которых еще нет
+        print(f"   Found {len(graph_pools)} pools from Graph API")
+        
         for pool in graph_pools:
             token0 = pool['token0']['symbol']
             token1 = pool['token1']['symbol']
@@ -259,23 +266,28 @@ class UniswapAnalyzer:
             if tvl >= self.MIN_TVL:
                 apr = self.calculate_v3_apr(pool, 7)
                 if apr >= self.MIN_APR:
-                    all_pools.append({
-                        'Pool': pool_name,
-                        'Network': network.upper(),
-                        'APR': round(apr),
-                        'TVL': round(tvl),
-                        'Source': 'Uniswap Graph'
-                    })
+                    # Проверяем, есть ли уже похожий пул
+                    pool_key = pool_name.lower()
+                    if pool_key not in pool_names_added:
+                        all_pools.append({
+                            'Pool': pool_name,
+                            'Network': network.upper(),
+                            'APR': round(apr),
+                            'TVL': round(tvl),
+                            'Source': 'Uniswap Graph'
+                        })
+                        pool_names_added.add(pool_key)
         
         # Remove duplicates and sort by APR
         unique_pools = {}
         for pool in all_pools:
-            pool_key = pool['Pool']
+            pool_key = pool['Pool'].lower()
             if pool_key not in unique_pools or pool['APR'] > unique_pools[pool_key]['APR']:
                 unique_pools[pool_key] = pool
         
         sorted_pools = sorted(unique_pools.values(), key=lambda x: x['APR'], reverse=True)
-        return sorted_pools[:8]  # Return top 8 pools
+        print(f"   Total unique pools after filtering: {len(sorted_pools)}")
+        return sorted_pools[:15]  # Return top 15 pools instead of 8
     
     async def send_results_to_telegram(self, arbitrum_pools, bsc_pools):
         """Send formatted results to Telegram"""
@@ -287,8 +299,8 @@ class UniswapAnalyzer:
         
         # Arbitrum pools
         if arbitrum_pools:
-            message += "🔹 <b>ARBITRUM NETWORK</b>\n"
-            for i, pool in enumerate(arbitrum_pools[:5], 1):
+            message += "🔹 <b>ARBITRUM NETWORK</b> ({} пулов)\n".format(len(arbitrum_pools))
+            for i, pool in enumerate(arbitrum_pools[:8], 1):
                 message += (f"{i}. {pool['Pool']}\n"
                           f"   📈 APR: <b>{pool['APR']}%</b>\n"
                           f"   💰 TVL: ${pool['TVL']:,}\n"
@@ -298,8 +310,8 @@ class UniswapAnalyzer:
         
         # BSC pools
         if bsc_pools:
-            message += "🔸 <b>BSC NETWORK</b>\n"
-            for i, pool in enumerate(bsc_pools[:5], 1):
+            message += "🔸 <b>BSC NETWORK</b> ({} пулов)\n".format(len(bsc_pools))
+            for i, pool in enumerate(bsc_pools[:8], 1):
                 message += (f"{i}. {pool['Pool']}\n"
                           f"   📈 APR: <b>{pool['APR']}%</b>\n"
                           f"   💰 TVL: ${pool['TVL']:,}\n"
