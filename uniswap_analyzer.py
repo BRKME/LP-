@@ -169,17 +169,16 @@ class UniswapAnalyzer:
                         data = await response.json()
                         pools = data.get('data', {}).get('pools', [])
                         
-                        # Filter pools by target tokens
-                        filtered_pools = [
+                        print(f"   Raw pools from {network} Graph API: {len(pools)}")
+                        
+                        # Don't filter - return all pools with sufficient TVL
+                        valid_pools = [
                             p for p in pools 
-                            if self.is_target_pool(
-                                p['token0']['symbol'], 
-                                p['token1']['symbol']
-                            )
+                            if float(p.get('totalValueLockedUSD', 0)) >= self.MIN_TVL
                         ]
                         
-                        print(f"✅ Fetched {len(filtered_pools)} target pools from {network}")
-                        return filtered_pools
+                        print(f"✅ Fetched {len(valid_pools)} pools from {network} (TVL >= ${self.MIN_TVL:,})")
+                        return valid_pools
                     else:
                         print(f"❌ {network} Graph API returned status: {response.status}")
                         return []
@@ -258,25 +257,29 @@ class UniswapAnalyzer:
         print(f"   Found {len(graph_pools)} pools from Graph API")
         
         for pool in graph_pools:
-            token0 = pool['token0']['symbol']
-            token1 = pool['token1']['symbol']
-            pool_name = f"{token0}-{token1}"
-            tvl = float(pool.get('totalValueLockedUSD', 0))
-            
-            if tvl >= self.MIN_TVL:
-                apr = self.calculate_v3_apr(pool, 7)
-                if apr >= self.MIN_APR:
-                    # Проверяем, есть ли уже похожий пул
-                    pool_key = pool_name.lower()
-                    if pool_key not in pool_names_added:
-                        all_pools.append({
-                            'Pool': pool_name,
-                            'Network': network.upper(),
-                            'APR': round(apr),
-                            'TVL': round(tvl),
-                            'Source': 'Uniswap Graph'
-                        })
-                        pool_names_added.add(pool_key)
+            try:
+                token0 = pool.get('token0', {}).get('symbol', 'UNKNOWN')
+                token1 = pool.get('token1', {}).get('symbol', 'UNKNOWN')
+                pool_name = f"{token0}-{token1}"
+                tvl = float(pool.get('totalValueLockedUSD', 0))
+                
+                if tvl >= self.MIN_TVL:
+                    apr = self.calculate_v3_apr(pool, 7)
+                    if apr >= self.MIN_APR:
+                        # Проверяем, есть ли уже похожий пул
+                        pool_key = pool_name.lower()
+                        if pool_key not in pool_names_added:
+                            all_pools.append({
+                                'Pool': pool_name,
+                                'Network': network.upper(),
+                                'APR': round(apr),
+                                'TVL': round(tvl),
+                                'Source': 'Uniswap Graph'
+                            })
+                            pool_names_added.add(pool_key)
+            except Exception as e:
+                print(f"   Error processing pool: {e}")
+                continue
         
         # Remove duplicates and sort by APR
         unique_pools = {}
