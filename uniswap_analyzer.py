@@ -8,28 +8,41 @@ import asyncio
 import aiohttp
 import json
 from datetime import datetime
+import locale
 
 class UniswapAnalyzer:
     def __init__(self):
         # Minimum thresholds
-        self.MIN_TVL = 800000  # $800,000
-        self.MIN_APR = 10  # Minimum APR 15%
+        self.MIN_TVL = 600000  # $600,000
+        self.MIN_APR = 10  # Minimum APR 10%
         
         # Telegram settings
         self.telegram_token = "8442392037:AAEiM_b4QfdFLqbmmc1PXNvA99yxmFVLEp8"
         self.chat_id = "350766421"
         
-        # Target tokens (без ARB)
-        self.target_tokens = [
-            'USDT', 'USDC', 'USDC.e', 'WETH', 'ETH', 'sETH', 'WBTC', 
-            'LINK', 'CRV', 'AAVE', 'SOL', 'ASTER', 'BNB', 'DAI', 
-            'PENDLE', 'ZRO'  # ARB исключен
-        ]
+        # Target tokens - все токены (без ограничений)
+        self.target_tokens = []
         
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json'
         }
+    
+    def get_formatted_date(self):
+        """Get formatted date string in Russian format"""
+        now = datetime.now()
+        
+        # Russian day names
+        days = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
+        months = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                  'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+        
+        day_name = days[now.weekday()]
+        day = now.day
+        month = months[now.month - 1]
+        week_number = now.isocalendar()[1]
+        
+        return f"{day_name} {day} {month}, неделя {week_number}"
     
     async def send_telegram_message(self, message: str):
         """Send message to Telegram"""
@@ -56,7 +69,10 @@ class UniswapAnalyzer:
             return False
     
     def is_target_pool(self, token0: str, token1: str) -> bool:
-        """Check if pool contains target tokens"""
+        """Check if pool contains target tokens (всегда True если нет ограничений)"""
+        if not self.target_tokens:
+            return True
+        
         norm_token0 = self.normalize_token_symbol(token0)
         norm_token1 = self.normalize_token_symbol(token1)
         
@@ -225,18 +241,15 @@ class UniswapAnalyzer:
         ]
         
         for pool in network_defillama:
-            # Check if pool contains target tokens
-            symbol = pool.get('symbol', '')
-            if any(token in symbol.upper() for token in self.target_tokens):
-                all_pools.append({
-                    'Pool': pool.get('symbol', 'Unknown'),
-                    'Network': network.upper(),
-                    'APR': round(pool.get('apy', 0)),
-                    'TVL': round(pool.get('tvlUsd', 0)),
-                    'Source': 'DeFiLlama'
-                })
+            all_pools.append({
+                'Pool': pool.get('symbol', 'Unknown'),
+                'Network': network.upper(),
+                'APR': round(pool.get('apy', 0)),
+                'TVL': round(pool.get('tvlUsd', 0)),
+                'Source': 'DeFiLlama'
+            })
         
-        # Process Graph API pools (уже отфильтрованы по целевым токенам)
+        # Process Graph API pools
         for pool in graph_pools:
             token0 = pool['token0']['symbol']
             token1 = pool['token1']['symbol']
@@ -266,12 +279,11 @@ class UniswapAnalyzer:
     
     async def send_results_to_telegram(self, arbitrum_pools, bsc_pools):
         """Send formatted results to Telegram"""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        formatted_date = self.get_formatted_date()
         
-        message = f"🚀 <b>Uniswap V3 Weekly Analysis</b>\n"
-        message += f"⏰ <i>{timestamp} (MSK)</i>\n"
-        message += f"📊 Min TVL: ${self.MIN_TVL:,} | Min APR: {self.MIN_APR}%\n"
-        message += f"🎯 Target tokens: {', '.join(self.target_tokens)}\n\n"
+        message = f"#Крипта #Best LP\n"
+        message += f"{formatted_date}\n\n"
+        message += f"📊 Min TVL: ${self.MIN_TVL:,} | Min APR: {self.MIN_APR}%\n\n"
         
         # Arbitrum pools
         if arbitrum_pools:
@@ -306,8 +318,8 @@ class UniswapAnalyzer:
         """Main analysis function"""
         print("🔧 Uniswap V3 Weekly Analyzer")
         print("=" * 50)
-        print(f"🎯 Target tokens: {', '.join(self.target_tokens)}")
         print(f"📊 Min TVL: ${self.MIN_TVL:,} | Min APR: {self.MIN_APR}%")
+        print("🎯 Target tokens: All tokens")
         print("=" * 50)
         
         # Define subgraph URLs
